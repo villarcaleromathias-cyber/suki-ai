@@ -4,3 +4,4 @@ groq
 PyPDF2
 streamlit-mic-recorder
 Pillow
+duckduckgo-search
