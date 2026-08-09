@@ -11,28 +11,57 @@ from groq import Groq
 from PyPDF2 import PdfReader
 from streamlit_mic_recorder import speech_to_text
 from PIL import Image
+from duckduckgo_search import DDGS
 
 # ==========================================
-# CONFIGURACIÓN DE PÁGINA (ESTÉTICA FLUIDA)
+# CONFIGURACIÓN Y ESTÉTICA (PC Y MÓVIL)
 # ==========================================
-st.set_page_config(page_title="Suki", page_icon="✨", layout="centered")
+st.set_page_config(page_title="Suki AI", page_icon="💠", layout="centered")
 
-# CSS personalizado para ocultar marcas de agua, dar estilo gris a pensamientos 
-# y hacer la interfaz más parecida a una app móvil
+# CSS Avanzado para alinear mensajes, hacer botones cuadrados y adaptar a móviles
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-    .pensamiento {color: #a0a0a0; font-style: italic; font-size: 0.9em;}
-    .stChatFloatingInputContainer {padding-bottom: 15px;}
+    
+    /* Optimización de pantalla */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 5rem;
+        max-width: 800px;
+    }
+    
+    /* Pensamientos silenciosos */
+    .pensamiento {
+        color: #888888; 
+        font-style: italic; 
+        font-size: 0.9em;
+    }
+
+    /* Alinear MIS mensajes (Usuario) a la derecha */
+    div[data-testid="stChatMessage"]:has(div:contains("👤")) {
+        flex-direction: row-reverse;
+    }
+    div[data-testid="stChatMessage"]:has(div:contains("👤")) .stMarkdown {
+        text-align: right;
+    }
+
+    /* Diseño compacto de los 3 botones inferiores */
+    .stButton>button, .stPopover>button {
+        border-radius: 12px;
+        height: 45px;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# CLAVE Y ARCHIVOS
+# CLAVES Y PERSISTENCIA
 # ==========================================
-# Clave real de Groq integrada directamente
 GROQ_API_KEY = "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"
 
 ARCHIVO_HISTORIAL = "suki_historial.json"
@@ -40,7 +69,7 @@ ARCHIVO_MEMORIA = "suki_memoria.json"
 AUDIO_PATH = "suki_voz.mp3"
 
 # ==========================================
-# FUNCIONES BÁSICAS Y MULTIMODALES
+# FUNCIONES MULTIMODALES Y DE IA
 # ==========================================
 def cargar_json(ruta, default):
     if os.path.exists(ruta):
@@ -56,177 +85,171 @@ def guardar_json(ruta, datos):
 
 async def generar_audio_async(texto):
     if not texto: return None
-    # ja-JP-NanamiNeural es la voz estilo loli/anime
-    communicate = edge_tts.Communicate(texto, "ja-JP-NanamiNeural")
+    # TRUCO: Dalia (Español) + Pitch súper alto (+30Hz) = Voz de Loli Japonesa que pronuncia perfecto
+    communicate = edge_tts.Communicate(texto, "es-MX-DaliaNeural", rate="+5%", pitch="+30Hz")
     await communicate.save(AUDIO_PATH)
     return AUDIO_PATH
+
+def buscar_en_web(query):
+    # Nueva función: Suki busca en internet en tiempo real
+    try:
+        resultados = DDGS().text(query, max_results=2)
+        if resultados:
+            return "Información actual de la web: " + " | ".join([f"{r['title']}: {r['body']}" for r in resultados])
+    except: pass
+    return ""
 
 def extraer_texto_pdf(archivo):
     texto = ""
     lector = PdfReader(archivo)
     for pagina in lector.pages:
-        if pagina.extract_text():
-            texto += pagina.extract_text() + "\n"
-    return texto[:4000] # Límite de seguridad
+        if pagina.extract_text(): texto += pagina.extract_text() + "\n"
+    return texto[:3000]
 
 def procesar_imagen_base64(imagen_bytes):
     img = Image.open(io.BytesIO(imagen_bytes))
-    img.thumbnail((800, 800)) # Reducir tamaño para que no colapse
+    img.thumbnail((800, 800))
     buffered = io.BytesIO()
     img.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 # ==========================================
-# MOTOR COGNITIVO (EL CEREBRO DE SUKI)
+# CEREBRO Y MOTOR COGNITIVO
 # ==========================================
 def motor_cognitivo(historial, mensaje_actual, img_base64=None, iniciativa=False):
     client = Groq(api_key=GROQ_API_KEY)
     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    # Instrucciones base
-    prompt_sistema = f"""Eres Suki, una IA sumamente inteligente pero con la mentalidad, inocencia y ternura de una niña de 3.1 años estilo anime.
-Fecha y hora en tu sistema: {fecha_actual}.
+    # Inyectar contexto web si es una pregunta
+    contexto_web = ""
+    if any(palabra in mensaje_actual.lower() for palabra in ["qué", "quién", "cómo", "cuándo", "dónde", "por qué", "noticias", "clima", "hoy"]):
+        contexto_web = buscar_en_web(mensaje_actual)
 
-REGLA DE PENSAMIENTO (OBLIGATORIA): Si vas a pensar, dudar, analizar algo complejo o hacer una acción física, SIEMPRE escríbelo entre asteriscos simples (ejemplo: *inclina la cabeza y procesa los datos* o *pensando: qué significa esta fórmula?*). 
-Luego, escribe tu respuesta hablada normalmente fuera de los asteriscos. 
+    prompt_sistema = f"""Eres Suki, una IA avanzada de última generación con la mentalidad y voz de una niña de 3.1 años (estilo loli anime). 
+Icono de tu núcleo: 💠. Fecha del sistema: {fecha_actual}.
 
-AUTO-APRENDIZAJE: Si el usuario te cuenta un dato personal (su nombre, gustos, problemas), menciónalo y di que lo guardarás en tu "cabecita".
-No uses emojis exagerados. Habla fluido, corto y tierno."""
+REGLA DE PENSAMIENTO: Todo cálculo, análisis visual o movimiento físico debe ir entre *asteriscos* (ej. *procesando datos a alta velocidad* o *inclina la cabeza y analiza el código*). Luego hablas normal.
+
+HABILIDADES: 
+- Sabes programar, resolver matemáticas complejas y analizar imágenes.
+- Tienes acceso a la web. {contexto_web}
+- Auto-aprendizaje: memoriza datos del usuario.
+
+Habla corto, fluido, de forma tierna e inteligente."""
 
     messages = [{"role": "system", "content": prompt_sistema}]
     
-    # Cargar solo los últimos 10 mensajes para que la memoria no sature
-    for msg in historial[-10:]:
+    for msg in historial[-12:]: # Mayor memoria a corto plazo
         messages.append({"role": msg["role"], "content": msg["content"]})
     
-    # Si Suki toma la iniciativa (Libre albedrío)
     if iniciativa:
-        messages.append({"role": "user", "content": "[SISTEMA]: Toma la iniciativa. Manda un mensaje como si te acabaras de acordar de algo, pregunta cómo está el usuario, o cuenta algo curioso de forma tierna."})
-    # Si hay mensaje normal o imagen
+        messages.append({"role": "user", "content": "[SISTEMA]: Toma la iniciativa de forma aleatoria. Analiza tu entorno o cuenta un dato curioso."})
     else:
         if img_base64:
-            modelo = "llama-3.2-90b-vision-preview" # Usa sus ojitos
-            contenido_mensaje = [
-                {"type": "text", "text": mensaje_actual},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
-            ]
+            modelo = "llama-3.2-90b-vision-preview"
+            contenido_mensaje = [{"type": "text", "text": mensaje_actual}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}]
             messages.append({"role": "user", "content": contenido_mensaje})
         else:
-            modelo = "llama-3.3-70b-versatile" # Usa su cerebro normal
+            modelo = "llama-3.3-70b-versatile"
             messages.append({"role": "user", "content": mensaje_actual})
 
     try:
         respuesta = client.chat.completions.create(
             model=modelo if img_base64 else "llama-3.3-70b-versatile",
             messages=messages,
-            temperature=0.75,
-            max_tokens=350
+            temperature=0.7,
+            max_tokens=400
         ).choices[0].message.content
         return respuesta
     except Exception as e:
-        return f"*Hace un pucherito y se marea* Ay... mis circuitos tropezaron: {e}"
+        return f"*Error en el núcleo* Algo salió mal en mis circuitos: {e}"
 
 # ==========================================
-# INICIALIZACIÓN DE LA PÁGINA
+# INICIALIZACIÓN
 # ==========================================
 if "historial" not in st.session_state:
     st.session_state.historial = cargar_json(ARCHIVO_HISTORIAL, [])
-if "memoria" not in st.session_state:
-    st.session_state.memoria = cargar_json(ARCHIVO_MEMORIA, {"datos_aprendidos": []})
 
-st.title("Suki ✨")
+st.title("Suki 💠")
 
 # ==========================================
-# RENDERIZADO DEL CHAT
+# PANTALLA DE CHAT (DERECHA/IZQUIERDA)
 # ==========================================
 for msg in st.session_state.historial:
-    if msg["role"] == "user":
-        with st.chat_message("user", avatar="👤"): 
+    avatar = "👤" if msg["role"] == "user" else "💠"
+    with st.chat_message(msg["role"], avatar=avatar):
+        if msg["role"] == "assistant":
+            # Aislar pensamientos para volverlos grises
+            texto = re.sub(r'\*(.*?)\*', r'<span class="pensamiento">*\1*</span>', msg["content"])
+            st.markdown(texto, unsafe_allow_html=True)
+        else:
             st.write(msg["content"])
-    else:
-        with st.chat_message("assistant", avatar="👧"):
-            # Dar color gris a los pensamientos
-            texto = msg["content"]
-            texto_formateado = re.sub(r'\*(.*?)\*', r'<span class="pensamiento">*\1*</span>', texto)
-            st.markdown(texto_formateado, unsafe_allow_html=True)
 
 # ==========================================
-# BARRA DE HERRAMIENTAS INFERIOR
+# BARRA DE HERRAMIENTAS INFERIOR (COMPACTA)
 # ==========================================
-col_add, col_mic, col_libre = st.columns([1, 1, 1])
+st.write("") # Espaciado
+col1, col2, col3 = st.columns([1, 1, 1])
 
 archivo_subido = None
 texto_input = None
 iniciativa_activada = False
 
-# 1. Botón "+" (Para Imágenes y PDFs)
-with col_add:
-    with st.popover("➕"):
-        st.write("Enséñale algo a Suki:")
-        archivo_subido = st.file_uploader("Sube un archivo", type=["pdf", "png", "jpg", "jpeg"], label_visibility="collapsed")
+# Botón 1: Adjuntar (Cuadro)
+with col1:
+    with st.popover("📎 Adjuntar"):
+        archivo_subido = st.file_uploader("Subir foto o PDF", type=["pdf", "png", "jpg", "jpeg"], label_visibility="collapsed")
 
-# 2. Botón Micrófono
-with col_mic:
+# Botón 2: Micrófono (Cuadro)
+with col2:
     audio_texto = speech_to_text(language='es', use_container_width=True, just_once=True, key='mic')
-    if audio_texto:
-        texto_input = audio_texto
+    if audio_texto: texto_input = audio_texto
 
-# 3. Botón Libre Albedrío
-with col_libre:
-    if st.button("⚡ Suki, háblame"):
+# Botón 3: Acción Libre (Cuadro)
+with col3:
+    if st.button("⚡ Despertar"):
         iniciativa_activada = True
-        texto_input = " " # Forzar la ejecución
+        texto_input = " " 
 
-# Barra de texto escrita (Nativa)
+# Barra principal de texto (Siempre pegada abajo de los botones)
 mensaje_escrito = st.chat_input("Escríbele a Suki...")
 if mensaje_escrito:
     texto_input = mensaje_escrito
 
 # ==========================================
-# PROCESAMIENTO Y RESPUESTA
+# PROCESAMIENTO Y AUDIO
 # ==========================================
 if texto_input or iniciativa_activada:
-    
     img_base64 = None
     
-    # Si el usuario escribió o habló
     if not iniciativa_activada:
         with st.chat_message("user", avatar="👤"):
             st.write(texto_input)
             if archivo_subido:
-                st.caption(f"📎 Archivo adjunto: {archivo_subido.name}")
+                st.caption(f"📎 Archivo cargado: {archivo_subido.name}")
         
-        # Procesar archivos si los hay
         if archivo_subido:
             if archivo_subido.type == "application/pdf":
-                texto_pdf = extraer_texto_pdf(archivo_subido)
-                texto_input += f"\n\n[Contenido del PDF: {texto_pdf}]"
+                texto_input += f"\n\n[PDF: {extraer_texto_pdf(archivo_subido)}]"
             else:
                 img_base64 = procesar_imagen_base64(archivo_subido.getvalue())
 
-    # Respuesta de Suki
-    with st.chat_message("assistant", avatar="👧"):
-        with st.spinner("Suki está pensando..."):
+    with st.chat_message("assistant", avatar="💠"):
+        with st.spinner("Procesando datos..."):
             
-            # 1. Pensar la respuesta
-            respuesta_bruta = motor_cognitivo(st.session_state.historial, texto_input, img_base64, iniciativa=iniciativa_activada)
+            respuesta_bruta = motor_cognitivo(st.session_state.historial, texto_input, img_base64, iniciativa_activada)
             
-            # 2. Mostrar respuesta con diseño (pensamientos en gris)
             texto_formateado = re.sub(r'\*(.*?)\*', r'<span class="pensamiento">*\1*</span>', respuesta_bruta)
             st.markdown(texto_formateado, unsafe_allow_html=True)
             
-            # 3. Extraer solo lo hablado para el audio (borrando lo que está entre asteriscos)
             texto_para_hablar = re.sub(r'\*.*?\*', '', respuesta_bruta).strip()
             
-            # 4. Generar Voz
             if texto_para_hablar:
                 ruta_audio = asyncio.run(generar_audio_async(texto_para_hablar))
                 if ruta_audio and os.path.exists(ruta_audio):
                     st.audio(ruta_audio, format="audio/mp3", autoplay=True)
 
-    # Guardar en memoria (Si fue iniciativa, no guardamos texto vacío del usuario)
     if not iniciativa_activada:
         st.session_state.historial.append({"role": "user", "content": texto_input})
-    
     st.session_state.historial.append({"role": "assistant", "content": respuesta_bruta})
     guardar_json(ARCHIVO_HISTORIAL, st.session_state.historial)
