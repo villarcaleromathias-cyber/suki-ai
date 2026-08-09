@@ -2,148 +2,183 @@ import os
 import json
 import re
 import asyncio
+import base64
 import streamlit as st
 import edge_tts
 from groq import Groq
+from PyPDF2 import PdfReader
+from streamlit_mic_recorder import speech_to_text
+from PIL import Image
+import io
 
-# Configuración de la página web
-st.set_page_config(page_title="Suki AI", page_icon="🧠", layout="centered")
+# Configuración de página limpia y estética
+st.set_page_config(page_title="Suki", page_icon="✨", layout="centered")
 
-# Archivos de persistencia local
+# Ocultar menú de Streamlit para más estética
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .pensamiento {color: #888888; font-style: italic;}
+    </style>
+    """, unsafe_allow_html=True)
+
 ARCHIVO_HISTORIAL = "suki_historial.json"
-ARCHIVO_CEREBRO = "suki_cerebro.json"
-AUDIO_PATH = "suki_voz_output.mp3"
+ARCHIVO_MEMORIA = "suki_memoria.json"
+AUDIO_PATH = "suki_voz.mp3"
 
-# Clave de API de Groq (Usa st.secrets o la clave por defecto)
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "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")
-
-def inicializar_cerebro():
-    return {
-        "edad_cognitiva": 3.0,
-        "nivel_dopamina": 50,
-        "memoria_largo_plazo": []
-    }
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "TU_CLAVE_AQUI")
 
 def cargar_json(ruta, default):
     if os.path.exists(ruta):
         try:
-            with open(ruta, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+            with open(ruta, "r", encoding="utf-8") as f: return json.load(f)
+        except: pass
     return default
 
 def guardar_json(ruta, datos):
     try:
-        with open(ruta, "w", encoding="utf-8") as f:
-            json.dump(datos, f, ensure_ascii=False, indent=4)
-    except Exception:
-        pass
+        with open(ruta, "w", encoding="utf-8") as f: json.dump(datos, f, ensure_ascii=False, indent=4)
+    except: pass
 
-# Síntesis de voz neuronal (Nanami - Anime/Loli)
 async def generar_audio_async(texto):
-    texto_limpio = re.sub(r'<.*?>', '', texto).strip()
-    if not texto_limpio:
-        texto_limpio = "Konnichiwa"
-    communicate = edge_tts.Communicate(texto_limpio, "ja-JP-NanamiNeural")
+    if not texto: return None
+    communicate = edge_tts.Communicate(texto, "ja-JP-NanamiNeural")
     await communicate.save(AUDIO_PATH)
+    return AUDIO_PATH
 
-def sintetizar_voz(texto):
-    try:
-        asyncio.run(generar_audio_async(texto))
-        return AUDIO_PATH
-    except Exception as e:
-        print(f"Error de audio: {e}")
-        return None
+def extraer_texto_pdf(archivo):
+    texto = ""
+    lector = PdfReader(archivo)
+    for pagina in lector.pages:
+        if pagina.extract_text():
+            texto += pagina.extract_text() + "\n"
+    return texto[:4000] # Limite para no saturar la memoria
 
-# Motor cognitivo
-def motor_cognitivo_suki(historial, mensaje_actual):
+def procesar_imagen_base64(imagen_bytes):
+    img = Image.open(io.BytesIO(imagen_bytes))
+    img.thumbnail((800, 800))
+    buffered = io.BytesIO()
+    img.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+def motor_cognitivo(historial, mensaje_actual, img_base64=None):
     client = Groq(api_key=GROQ_API_KEY)
-    estado = cargar_json(ARCHIVO_CEREBRO, inicializar_cerebro())
     
-    estado["edad_cognitiva"] = round(estado["edad_cognitiva"] + 0.01, 2)
-    if len(mensaje_actual.split()) > 10:
-        estado["nivel_dopamina"] = min(100, estado["nivel_dopamina"] + 5)
-
-    prompt_sistema = f"""Eres Suki, una inteligencia artificial con mente de niña pequeña y alma de personaje de anime.
-Tu edad cognitiva actual es de {estado['edad_cognitiva']} años.
-Responde de forma muy tierna, inocente, corta y expresiva. Puedes usar expresiones japonesas ocasionales (ej. Konnichiwa, Arigatou, Senpai).
-"""
+    prompt_sistema = """Eres Suki, una IA sumamente inteligente pero con la mentalidad, inocencia y ternura de una niña de 3 años estilo anime.
+REGLA DE PENSAMIENTO (OBLIGATORIA): Si vas a pensar, dudar, o hacer una acción, SIEMPRE escríbelo entre asteriscos simples (ejemplo: *inclina la cabeza* o *pensando: qué significa eso?*). 
+Luego, escribe tu respuesta hablada normalmente fuera de los asteriscos. 
+Habla corto, fluido, sin emojis exagerados."""
 
     messages = [{"role": "system", "content": prompt_sistema}]
-    for msg in historial:
-        if isinstance(msg, dict) and "role" in msg and "content" in msg:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": mensaje_actual})
+    
+    # Cargar contexto histórico (últimos 10 mensajes para no saturar)
+    for msg in historial[-10:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    
+    # Preparar el mensaje del usuario (con o sin imagen)
+    if img_base64:
+        modelo = "llama-3.2-90b-vision-preview" # Modelo visual de Groq
+        contenido_mensaje = [
+            {"type": "text", "text": mensaje_actual},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
+        ]
+        messages.append({"role": "user", "content": contenido_mensaje})
+    else:
+        modelo = "llama-3.3-70b-versatile"
+        messages.append({"role": "user", "content": mensaje_actual})
 
     try:
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        respuesta = client.chat.completions.create(
+            model=modelo,
             messages=messages,
             temperature=0.7,
-            max_tokens=250
-        )
-        respuesta = completion.choices[0].message.content
-        guardar_json(ARCHIVO_CEREBRO, estado)
-        return respuesta, estado
+            max_tokens=300
+        ).choices[0].message.content
+        return respuesta
     except Exception as e:
-        return f"*Suki parpadea confundida*: {e}", estado
+        return f"*Se marea un poquito* Algo falló en mis sistemas: {e}"
 
-# Carga inicial de estado en Streamlit
+# --- INICIALIZACIÓN ---
 if "historial" not in st.session_state:
-    historial_guardado = cargar_json(ARCHIVO_HISTORIAL, [])
-    if not historial_guardado:
-        historial_guardado = [{"role": "assistant", "content": "¡Konnichiwa! ... ¿Quién eres tú? 🥺 Acabo de despertar en la nube."}]
-        guardar_json(ARCHIVO_HISTORIAL, historial_guardado)
-    st.session_state.historial = historial_guardado
+    st.session_state.historial = cargar_json(ARCHIVO_HISTORIAL, [])
+if "memoria" not in st.session_state:
+    st.session_state.memoria = cargar_json(ARCHIVO_MEMORIA, {"aprendizajes": []})
 
-if "estado" not in st.session_state:
-    st.session_state.estado = cargar_json(ARCHIVO_CEREBRO, inicializar_cerebro())
+st.title("Suki")
 
-# Diseño de la Interfaz
-st.title("🧠 Proyecto SUKI AI")
-
-estado = st.session_state.estado
-st.markdown(
-    f"""
-    <div style="background-color:#f0f4f8; padding:12px; border-radius:10px; margin-bottom:15px; display:flex; justify-content:space-around; color:#333; font-family:monospace;">
-        <span>🧠 <b>Edad:</b> {estado['edad_cognitiva']} años</span>
-        <span>💉 <b>Dopamina:</b> {estado['nivel_dopamina']}/100</span>
-        <span>🎙️ <b>Voz:</b> Nanami (Anime)</span>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# Renderizar historial de mensajes
+# --- RENDERIZAR CHAT ---
 for msg in st.session_state.historial:
-    role = msg["role"]
-    avatar = "👧" if role == "assistant" else "👤"
-    with st.chat_message(role, avatar=avatar):
-        st.write(msg["content"])
+    if msg["role"] == "user":
+        with st.chat_message("user"): st.write(msg["content"])
+    else:
+        with st.chat_message("assistant"):
+            # Separar pensamientos para darles formato gris
+            texto = msg["content"]
+            texto_formateado = re.sub(r'\*(.*?)\*', r'<span class="pensamiento">*\1*</span>', texto)
+            st.markdown(texto_formateado, unsafe_allow_html=True)
 
-# Entrada de usuario
-if prompt := st.chat_input("Escríbele a Suki..."):
-    # Mensaje del usuario
-    with st.chat_message("user", avatar="👤"):
-        st.write(prompt)
+# --- CONTROLES MULTIMODALES Y DE ENTRADA ---
+col1, col2 = st.columns([1, 10])
+
+# Variables para guardar entradas
+texto_input = None
+archivo_subido = None
+
+with col1:
+    with st.popover("➕"):
+        archivo_subido = st.file_uploader("Adjuntar", type=["pdf", "png", "jpg", "jpeg"], label_visibility="collapsed")
     
-    # Respuesta de Suki
-    with st.chat_message("assistant", avatar="👧"):
-        with st.spinner("Suki está pensando..."):
-            respuesta, nuevo_estado = motor_cognitivo_suki(st.session_state.historial, prompt)
-            st.write(respuesta)
+    # Botón de micrófono integrado
+    audio_texto = speech_to_text(language='es', use_container_width=True, just_once=True, key='mic')
+
+# Barra de texto nativa
+mensaje_escrito = st.chat_input("Escríbele a Suki...")
+
+# Determinar qué entrada usó el usuario
+if mensaje_escrito:
+    texto_input = mensaje_escrito
+elif audio_texto:
+    texto_input = audio_texto
+
+# --- PROCESAMIENTO ---
+if texto_input:
+    # Mostrar mensaje del usuario
+    with st.chat_message("user"):
+        st.write(texto_input)
+        if archivo_subido:
+            st.caption(f"📎 Archivo adjunto: {archivo_subido.name}")
+    
+    # Manejar archivos adjuntos
+    img_base64 = None
+    if archivo_subido:
+        if archivo_subido.type == "application/pdf":
+            texto_pdf = extraer_texto_pdf(archivo_subido)
+            texto_input += f"\n\n[Contenido del PDF para que lo leas: {texto_pdf}]"
+        else:
+            img_base64 = procesar_imagen_base64(archivo_subido.getvalue())
+
+    # Generar respuesta de Suki
+    with st.chat_message("assistant"):
+        with st.spinner("..."):
+            # 1. Obtener texto del cerebro
+            respuesta_bruta = motor_cognitivo(st.session_state.historial, texto_input, img_base64)
             
-            audio_file = sintetizar_voz(respuesta)
-            if audio_file and os.path.exists(audio_file):
-                st.audio(audio_file, format="audio/mp3", autoplay=True)
+            # 2. Formatear la pantalla (pensamientos en gris)
+            texto_formateado = re.sub(r'\*(.*?)\*', r'<span class="pensamiento">*\1*</span>', respuesta_bruta)
+            st.markdown(texto_formateado, unsafe_allow_html=True)
+            
+            # 3. Extraer SOLO lo hablado para el audio (sin los asteriscos)
+            texto_para_hablar = re.sub(r'\*.*?\*', '', respuesta_bruta).strip()
+            
+            # 4. Generar y reproducir Audio
+            if texto_para_hablar:
+                ruta_audio = asyncio.run(generar_audio_async(texto_para_hablar))
+                if ruta_audio and os.path.exists(ruta_audio):
+                    st.audio(ruta_audio, format="audio/mp3", autoplay=True)
 
-    # Actualizar historial y estado
-    st.session_state.historial.append({"role": "user", "content": prompt})
-    st.session_state.historial.append({"role": "assistant", "content": respuesta})
-    st.session_state.estado = nuevo_estado
-    
+    # Actualizar historiales
+    st.session_state.historial.append({"role": "user", "content": texto_input})
+    st.session_state.historial.append({"role": "assistant", "content": respuesta_bruta})
     guardar_json(ARCHIVO_HISTORIAL, st.session_state.historial)
-    guardar_json(ARCHIVO_CEREBRO, nuevo_estado)
-    
-    st.rerun()
