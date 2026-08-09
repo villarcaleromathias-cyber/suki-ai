@@ -90,10 +90,18 @@ def guardar_json(ruta, datos):
 
 async def generar_audio_async(texto):
     if not texto: return None
-    # VOZ AJUSTADA: Lucia (Suave, natural y clara) con pitch moderado (+12Hz) para evitar lo chillón
-    communicate = edge_tts.Communicate(texto, "es-MX-LuciaNeural", rate="+3%", pitch="+12Hz")
-    await communicate.save(AUDIO_PATH)
-    return AUDIO_PATH
+    # Limpiar emojis y símbolos de markdown para evitar que el TTS falle
+    texto_limpio = re.sub(r'[#_*`~<>\[\]()💠🤖👤⚡📎]', '', texto).strip()
+    if not texto_limpio:
+        return None
+    try:
+        # Usamos la voz Lucia de forma estable para evitar errores de conexión o rechazo
+        communicate = edge_tts.Communicate(texto_limpio, "es-MX-LuciaNeural")
+        await communicate.save(AUDIO_PATH)
+        return AUDIO_PATH
+    except Exception as e:
+        print(f"Aviso de audio omitido: {e}")
+        return None
 
 def buscar_en_web(query):
     try:
@@ -177,7 +185,7 @@ if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
 st.title("Suki 💠")
-st.markdown(f"<div class='estado-animo'>🧠 Núcleo Activo | 🔋 Batería: 100% | 💖 Estado: Feliz y con voz optimizada</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='estado-animo'>🧠 Núcleo Activo | 🔋 Batería: 100% | 💖 Estado: Estable y optimizado</div>", unsafe_allow_html=True)
 
 # ==========================================
 # PANTALLA DE CHAT (DERECHA/IZQUIERDA)
