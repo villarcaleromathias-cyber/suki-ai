@@ -28,7 +28,7 @@ ARCHIVO_HISTORIAL = "suki_historial.json"
 ARCHIVO_MEMORIA = "suki_memoria.json"
 AUDIO_PATH = "suki_voz.mp3"
 
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "TU_CLAVE_AQUI")
+GROQ_API_KEY = st.secrets.get(GROQ_API_KEY = "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")
 
 def cargar_json(ruta, default):
     if os.path.exists(ruta):
