@@ -1,12 +1,11 @@
 import os
 import json
 import re
-import asyncio
 import base64
 import io
 from datetime import datetime
 import streamlit as st
-import edge_tts
+import streamlit.components.v1 as components
 from groq import Groq
 from PyPDF2 import PdfReader
 from streamlit_mic_recorder import speech_to_text
@@ -69,9 +68,31 @@ st.markdown("""
 # CLAVES Y PERSISTENCIA
 # ==========================================
 GROQ_API_KEY = "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"
-
 ARCHIVO_HISTORIAL = "suki_historial.json"
-AUDIO_PATH = "suki_voz.mp3"
+
+# ==========================================
+# FUNCIONES DE AUDIO (SISTEMA NATIVO JS)
+# ==========================================
+def hablar_suki(texto):
+    if not texto: return
+    # Limpiar símbolos para que el lector de voz no lea caracteres extraños
+    texto_limpio = re.sub(r'[#_*`~<>\[\]()💠🤖👤⚡📎\n"]', ' ', texto).strip()
+    if not texto_limpio: return
+    
+    # Reproductor de voz integrado directamente en el navegador del usuario (PC o Móvil)
+    js_code = f"""
+    <script>
+        if ('speechSynthesis' in window) {{
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance({json.dumps(texto_limpio)});
+            utterance.lang = 'es-ES';
+            utterance.rate = 1.05;
+            utterance.pitch = 1.25; // Tono ligeramente más agudo para darle su toque tierno
+            window.speechSynthesis.speak(utterance);
+        }}
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
 
 # ==========================================
 # FUNCIONES MULTIMODALES Y DE IA
@@ -87,21 +108,6 @@ def guardar_json(ruta, datos):
     try:
         with open(ruta, "w", encoding="utf-8") as f: json.dump(datos, f, ensure_ascii=False, indent=4)
     except: pass
-
-async def generar_audio_async(texto):
-    if not texto: return None
-    # Limpiar símbolos y markdown para que la síntesis de voz no falle
-    texto_limpio = re.sub(r'[#_*`~<>\[\]()💠🤖👤⚡📎]', '', texto).strip()
-    if not texto_limpio:
-        return None
-    try:
-        # Voz japonesa oficial (NanamiNeural): suave, clara, natural y con ese acento anime perfecto
-        communicate = edge_tts.Communicate(texto_limpio, "ja-JP-NanamiNeural")
-        await communicate.save(AUDIO_PATH)
-        return AUDIO_PATH
-    except Exception as e:
-        print(f"Aviso de audio omitido: {e}")
-        return None
 
 def buscar_en_web(query):
     try:
@@ -185,7 +191,7 @@ if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
 st.title("Suki 💠")
-st.markdown(f"<div class='estado-animo'>🧠 Núcleo Activo | 🔋 Batería: 100% | 💖 Estado: Voz Japonesa Natural Activa</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='estado-animo'>🧠 Núcleo Activo | 🔋 Batería: 100% | 💖 Estado: Voz Activa y Optimizada</div>", unsafe_allow_html=True)
 
 # ==========================================
 # PANTALLA DE CHAT (DERECHA/IZQUIERDA)
@@ -252,12 +258,11 @@ if texto_input or iniciativa_activada:
             texto_formateado = re.sub(r'\*(.*?)\*', r'<span class="pensamiento">*\1*</span>', respuesta_bruta)
             st.markdown(texto_formateado, unsafe_allow_html=True)
             
+            # Aislar solo lo hablado (sin pensamientos entre asteriscos)
             texto_para_hablar = re.sub(r'\*.*?\*', '', respuesta_bruta).strip()
             
             if texto_para_hablar:
-                ruta_audio = asyncio.run(generar_audio_async(texto_para_hablar))
-                if ruta_audio and os.path.exists(ruta_audio):
-                    st.audio(ruta_audio, format="audio/mp3")
+                hablar_suki(texto_para_hablar)
 
     if not iniciativa_activada:
         st.session_state.historial.append({"role": "user", "content": texto_input})
