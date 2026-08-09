@@ -1,12 +1,11 @@
 import os
 import json
 import re
-import asyncio
 import base64
 import io
 from datetime import datetime
 import streamlit as st
-import edge_tts
+from gtts import gTTS
 from groq import Groq
 from PyPDF2 import PdfReader
 from streamlit_mic_recorder import speech_to_text
@@ -88,19 +87,18 @@ def guardar_json(ruta, datos):
         with open(ruta, "w", encoding="utf-8") as f: json.dump(datos, f, ensure_ascii=False, indent=4)
     except: pass
 
-async def generar_audio_async(texto):
+def generar_audio(texto):
     if not texto: return None
-    # Limpiar emojis y símbolos de markdown para evitar que el TTS falle
+    # Limpiar símbolos y markdown para que la voz suene limpia y natural
     texto_limpio = re.sub(r'[#_*`~<>\[\]()💠🤖👤⚡📎]', '', texto).strip()
     if not texto_limpio:
         return None
     try:
-        # Usamos la voz Lucia de forma estable para evitar errores de conexión o rechazo
-        communicate = edge_tts.Communicate(texto_limpio, "es-MX-LuciaNeural")
-        await communicate.save(AUDIO_PATH)
+        tts = gTTS(text=texto_limpio, lang='es', slow=False)
+        tts.save(AUDIO_PATH)
         return AUDIO_PATH
     except Exception as e:
-        print(f"Aviso de audio omitido: {e}")
+        print(f"Error generando audio: {e}")
         return None
 
 def buscar_en_web(query):
@@ -185,7 +183,7 @@ if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
 st.title("Suki 💠")
-st.markdown(f"<div class='estado-animo'>🧠 Núcleo Activo | 🔋 Batería: 100% | 💖 Estado: Estable y optimizado</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='estado-animo'>🧠 Núcleo Activo | 🔋 Batería: 100% | 💖 Estado: Estable y Hablando</div>", unsafe_allow_html=True)
 
 # ==========================================
 # PANTALLA DE CHAT (DERECHA/IZQUIERDA)
@@ -255,9 +253,9 @@ if texto_input or iniciativa_activada:
             texto_para_hablar = re.sub(r'\*.*?\*', '', respuesta_bruta).strip()
             
             if texto_para_hablar:
-                ruta_audio = asyncio.run(generar_audio_async(texto_para_hablar))
+                ruta_audio = generar_audio(texto_para_hablar)
                 if ruta_audio and os.path.exists(ruta_audio):
-                    st.audio(ruta_audio, format="audio/mp3", autoplay=True)
+                    st.audio(ruta_audio, format="audio/mp3")
 
     if not iniciativa_activada:
         st.session_state.historial.append({"role": "user", "content": texto_input})
