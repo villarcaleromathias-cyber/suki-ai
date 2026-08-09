@@ -1,5 +1,5 @@
 streamlit
-edge-tts
+gtts
 groq
 PyPDF2
 streamlit-mic-recorder
